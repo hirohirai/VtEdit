@@ -96,6 +96,8 @@ class VtParts:
     UnEdit_C = 'green'
     Edit_C = 'cyan'
     Active_C = 'GreenYellow'
+    FineTuneDis = 3
+    FineTuneNum = 10
 
     def __init__(self, tkcanvas, name='tongue', dat=None, EditFlg=False, mat_affine=None, win=None):
         self.name = name # tongue,
@@ -276,7 +278,8 @@ class VtParts:
         self.reset_dr_posi()
 
     def fine_tune(self, img_np, flip_flg):
-        f = scipy.interpolate.interp2d(np.arange(256),np.arange(256), img_np, 'cubic')
+        sz = img_np.shape
+        f = scipy.interpolate.interp2d(np.arange(sz[0]),np.arange(sz[1]), img_np, 'cubic')
         c_dat = self.point[self.fr_num]
         ret_xy = [c_dat[0]]
         for ix in range(1,len(c_dat)-1):
@@ -286,40 +289,44 @@ class VtParts:
             b = c_dat[ix][1] - a * c_dat[ix][0]
             dl = np.sqrt(1+a*a)
             if a0 < 0 and a1 < 0:
-                xi = np.arange(10, -11, -1) / 10 * (3 / dl) + c_dat[ix][0]
+                xi = np.arange(self.FineTuneNum, -(self.FineTuneNum + 1), -1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
                 yi = a * xi + b
                 imtmp = f(xi, yi)
-                y = np.array([imtmp[ii, 20-ii] for ii in range(20)])
+                y = np.array([imtmp[ii, self.FineTuneNum*2-ii] for ii in range(self.FineTuneNum*2)])
                 dy = y[1:] - y[:-1]
                 if flip_flg:
                     kk = np.argmax(dy)
                 else:
                     kk = np.argmin(dy)
             elif a0 > 0 and a1 < 0:
-                xi = np.arange(10, -11, -1) / 10 * (3 / dl) + c_dat[ix][0]
+                xi = np.arange(self.FineTuneNum, -(self.FineTuneNum + 1), -1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
                 yi = a * xi + b
                 imtmp = f(xi, yi)
-                y = np.array([imtmp[20-ii, 20-ii] for ii in range(20)])
+                y = np.array([imtmp[self.FineTuneNum*2-ii, self.FineTuneNum*2-ii] for ii in range(self.FineTuneNum*2)])
                 dy = y[1:] - y[:-1]
                 if flip_flg:
                     kk = np.argmax(dy)
                 else:
                     kk = np.argmin(dy)
             elif a0 > 0 and a1 > 0:
-                xi = np.arange(-10, 11, 1) / 10 * (3 / dl) + c_dat[ix][0]
+                xi = np.arange(-self.FineTuneNum, self.FineTuneNum + 1, 1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
                 yi = a * xi + b
                 imtmp = f(xi, yi)
-                y = np.array([imtmp[20 - ii, ii] for ii in range(20)])
+                y = np.array([imtmp[self.FineTuneNum*2 - ii, ii] for ii in range(self.FineTuneNum*2)])
                 dy = y[1:] - y[:-1]
                 if flip_flg:
                     kk = np.argmax(dy)
                 else:
                     kk = np.argmin(dy)
             else:
-                xi = np.arange(-10, 11, 1) / 10 * (3 / dl) + c_dat[ix][0]
+                xi = np.arange(-self.FineTuneNum, (self.FineTuneNum + 1), 1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
                 yi = a * xi + b
                 imtmp = f(xi, yi)
-                y = np.array([imtmp[ii, ii] for ii in range(20)])
+                y = np.array([imtmp[ii, ii] for ii in range(self.FineTuneNum*2)])
                 dy = y[1:] - y[:-1]
                 if flip_flg:
                     kk = np.argmax(dy)
@@ -360,6 +367,8 @@ class VTShape:
         self.part_name = part
         self.fr_num = fr_num
 
+        self.init_class_values(cfg)
+
         self.parts = {}
 
         self.read_dat()
@@ -371,6 +380,9 @@ class VTShape:
             return len(self.parts[self.part_name])
         else:
             return 0
+
+    def init_class_values(self, cfg):
+        VtParts.FineTuneDis=cfg.finetune_distance
 
 
     def reset_para(self):

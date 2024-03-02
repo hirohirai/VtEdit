@@ -20,3 +20,5 @@ vt:
   dir: data/dat/s1/all
   fname: A01
   file: '{dir}/{fname}.dat'
+
+  finetune_distance: 3
