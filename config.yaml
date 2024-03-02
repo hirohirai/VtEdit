@@ -1,0 +1,22 @@
+canvas:
+  size_x: 512
+  size_y: 600
+  frame_num: 0
+  parts_name: tongue
+
+mri:
+  offset_x: 10
+  offset_y: 80
+  scale: 4.0
+
+  dir: data/Img/s1
+  fname: A01
+  ext: npy
+  file: '{dir}/{fname}/{frame_num:03d}.{ext}'
+  num_base: 0
+
+
+vt:
+  dir: data/dat/s1/all
+  fname: A01
+  file: '{dir}/{fname}.dat'
