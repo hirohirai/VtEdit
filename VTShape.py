@@ -137,7 +137,7 @@ class VtPartsBase:
             return dat
 
     def smoothing(self):
-        self.point[self.fr_num] = smoothing(self.point[self.fr_num], 0, len(self.point)-1)
+        self.point[self.fr_num] = smoothing(self.point[self.fr_num], 0, len(self.point[self.fr_num])-1)
 
     def resample(self):
         self.point[self.fr_num] = resample(self.point[self.fr_num], self.resample_num)

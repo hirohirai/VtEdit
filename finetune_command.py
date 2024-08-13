@@ -18,6 +18,16 @@ import VTShape
 logger = logging.getLogger(__name__)
 
 
+def fine_tuneX3(part, img_np):
+    flip_flg = True if part.name in ['uplips', 'lowerlips', 'uppharynx', 'lowpharynx'] else False
+    for ii in range(3):
+        part.smoothing()
+        part.resample()
+        part.fine_tune(img_np, flip_flg)
+    part.smoothing()
+    part.resample()
+
+
 def main(args):
     part_names = args.parts.split(',')
     vts = VTShape.VTShapeBase(part_names[0])
@@ -35,16 +45,13 @@ def main(args):
         mri = MriImg.MriBase(fname)
         img_np = np.array(mri.pil_image)
         for pname in part_names:
-            flip_flg = True if pname in ['uplips', 'lowerlips', 'uppharynx', 'lowpharynx'] else False
             part = vts.parts[pname]
             part.fr_num=ix
-            for ii in range(3):
-                part.smoothing()
-                part.resample()
-                part.fine_tune(img_np, flip_flg)
-            part.smoothing()
-            part.resample()
+            fine_tuneX3(part,img_np)
 
+
+    odir = os.path.split(args.odat)[0]
+    os.makedirs(odir, exist_ok=True)
     vts.save_dat(args.odat)
 
 if __name__ == "__main__":
