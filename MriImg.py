@@ -16,8 +16,21 @@ from PIL import Image, ImageTk, ImageOps
 # ログの設定
 logger = logging.getLogger(__name__)
 
+class MriBase:
+    def __init__(self, fname):
+        self.pil_image = self.read_file(fname)
 
-class Mri:
+    def read_file(self, fname):
+        if fname.endswith('npy'):
+            npimg = np.load(fname)
+            return Image.fromarray(npimg)
+        else:
+            return Image.open(fname)
+
+    def get_size(self):
+        return self.pil_image.width, self.pil_image.height
+
+class Mri(MriBase):
     def __init__(self, canvas, cfg, num=0, num_base=0):
         self.canvas = canvas
         self.cfg = cfg
@@ -29,14 +42,8 @@ class Mri:
     def read_file(self):
         num = self.num + self.num_base
         fname = self.cfg.file.format(dir=self.cfg.dir,fname=self.cfg.fname, frame_num=num, ext=self.cfg.ext)
-        if self.cfg.ext == 'npy':
-            npimg = np.load(fname)
-            self.pil_image = Image.fromarray(npimg)
-        else:
-            self.pil_image = Image.open(fname)
 
-    def get_size(self):
-        return self.pil_image.width, self.pil_image.height
+        self.pil_image = super().read_file(fname)
 
     def get_image(self, mat_affine):
         # キャンバスから画像データへのアフィン変換行列を求める

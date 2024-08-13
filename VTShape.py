@@ -90,39 +90,143 @@ class VtPoint:
         self.tkcanvas.delete(self.tk_id)
 
 
+def smoothing(point, st, ed):
+    if ed - st + 1 > 5:
+        dat = signal.savgol_filter(point[st:ed+1], 5, 2, axis=0)
+        point[st:ed+1] = dat
+    return point
 
 
-class VtParts:
-    UnEdit_C = 'green'
-    Edit_C = 'cyan'
-    Active_C = 'GreenYellow'
+def resample(point, resample_num):
+    nn = len(point)
+    f = scipy.interpolate.interp1d(np.arange(nn) * resample_num, point.T)
+    y = f(np.arange((nn-1)*resample_num)).T
+    dxy = y[1:] - y[:-1]
+    dxy2 = dxy * dxy
+    dd = np.sqrt(dxy2[:,0] + dxy2[:,1])
+    ddcumsum = np.cumsum(dd)
+    po = np.arange(nn) * ddcumsum[-1] /(nn-1)
+
+    pix =[0]
+    for ix in range(1,nn-1):
+        dis = np.abs(ddcumsum - po[ix])
+        pix.append(np.argmin(dis))
+    pix.append(-1)
+    return y[np.array(pix)]
+
+
+class VtPartsBase:
     FineTuneDis = 3
     FineTuneNum = 10
 
+    def __init__(self, name='tongue', dat=None):
+        self.name = name
+        self.point = self.set_data(dat)   # ポイントのデータ 全てのフレームを含む
+        self.fr_num = 0
+
+        self.resample_num = 100 # 何倍にするか
+
+    def __len__(self):
+        return len(self.point)
+
+    def set_data(self, dat):
+        if len(dat.shape) == 2:
+            sz = dat.shape
+            return dat.reshape((sz[0], int(sz[1]/2),2))
+        else:
+            return dat
+
+    def smoothing(self):
+        self.point[self.fr_num] = smoothing(self.point[self.fr_num], 0, len(self.point)-1)
+
+    def resample(self):
+        self.point[self.fr_num] = resample(self.point[self.fr_num], self.resample_num)
+
+    def fine_tune_base(self, img_np, flip_flg):
+        sz = img_np.shape
+        f = scipy.interpolate.interp2d(np.arange(sz[0]),np.arange(sz[1]), img_np, 'cubic')
+        c_dat = self.point[self.fr_num]
+        ret_xy = [c_dat[0]]
+        for ix in range(1,len(c_dat)-1):
+            a0 = (c_dat[ix + 1][0] - c_dat[ix - 1][0])
+            a1 = (c_dat[ix + 1][1] - c_dat[ix - 1][1])
+            a = -a0 / (a1 + 0.00000001)
+            b = c_dat[ix][1] - a * c_dat[ix][0]
+            dl = np.sqrt(1+a*a)
+            if a0 < 0 and a1 < 0:
+                xi = np.arange(self.FineTuneNum, -(self.FineTuneNum + 1), -1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
+                yi = a * xi + b
+                imtmp = f(xi, yi)
+                y = np.array([imtmp[ii, self.FineTuneNum*2-ii] for ii in range(self.FineTuneNum*2)])
+                dy = y[1:] - y[:-1]
+                if flip_flg:
+                    kk = np.argmax(dy)
+                else:
+                    kk = np.argmin(dy)
+            elif a0 > 0 and a1 < 0:
+                xi = np.arange(self.FineTuneNum, -(self.FineTuneNum + 1), -1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
+                yi = a * xi + b
+                imtmp = f(xi, yi)
+                y = np.array([imtmp[self.FineTuneNum*2-ii, self.FineTuneNum*2-ii] for ii in range(self.FineTuneNum*2)])
+                dy = y[1:] - y[:-1]
+                if flip_flg:
+                    kk = np.argmax(dy)
+                else:
+                    kk = np.argmin(dy)
+            elif a0 > 0 and a1 > 0:
+                xi = np.arange(-self.FineTuneNum, self.FineTuneNum + 1, 1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
+                yi = a * xi + b
+                imtmp = f(xi, yi)
+                y = np.array([imtmp[self.FineTuneNum*2 - ii, ii] for ii in range(self.FineTuneNum*2)])
+                dy = y[1:] - y[:-1]
+                if flip_flg:
+                    kk = np.argmax(dy)
+                else:
+                    kk = np.argmin(dy)
+            else:
+                xi = np.arange(-self.FineTuneNum, (self.FineTuneNum + 1), 1) / self.FineTuneNum * (
+                            self.FineTuneDis / dl) + c_dat[ix][0]
+                yi = a * xi + b
+                imtmp = f(xi, yi)
+                y = np.array([imtmp[ii, ii] for ii in range(self.FineTuneNum*2)])
+                dy = y[1:] - y[:-1]
+                if flip_flg:
+                    kk = np.argmax(dy)
+                else:
+                    kk = np.argmin(dy)
+            x_ = (xi[kk] + xi[kk+1])/2
+            y_ = (yi[kk] + yi[kk+1])/2
+            ret_xy.append([x_, y_])
+        ret_xy.append(c_dat[-1])
+        po = np.array(ret_xy)
+        return po
+
+    def fine_tune(self, img_np, flip_flg):
+        self.point[self.fr_num][1:-1] = self.fine_tune_base(img_np, flip_flg)[1:-1]
+
+
+class VtParts(VtPartsBase):
+    UnEdit_C = 'green'
+    Edit_C = 'cyan'
+    Active_C = 'GreenYellow'
+
     def __init__(self, tkcanvas, name='tongue', dat=None, EditFlg=False, mat_affine=None, win=None):
-        self.name = name # tongue,
-        self.point = None    # ポイントのデータ 全てのフレームを含む
+        super().__init__(name, dat)
         self.mat_affine = mat_affine # 保存用
         self.dr_point = None    # キャンパス上の位置　対処のフレームのみ np.array
         self.dr_point_save = []
         self.EditFlg = EditFlg  # 修正対象か？
         self.vt_point = []         # 作業用のVtPointの配列
         self.tkcanvas = tkcanvas
-        self.fr_num = 0
         self.win=win
 
         self.sel_st_p = 1000   # 作業用
         self.sel_ed_p = -1   # 作業用
 
-        self.resample_num = 100 # 何倍にするか
-
         self.tk_line_id = None
-
-        if dat is not None:
-            self.set_data(dat)
-
-    def __len__(self):
-        return len(self.point)
 
     def reset_para(self):
         self.sel_st_p = 1000
@@ -135,14 +239,6 @@ class VtParts:
     def backup(self):
         self.dr_point_save.append(np.array(self.dr_point))
 
-    def set_data(self, dat):
-        if len(dat.shape) == 2:
-            sz = dat.shape
-            self.point = dat.reshape((sz[0], int(sz[1]/2),2))
-        else:
-            self.point = dat
-        self.dr_point = None
-
     def get_drpoint(self):
         dr_p = (self.mat_affine[:2, :2] @ self.point[self.fr_num].T).T + self.mat_affine[:2, -1]
         return dr_p
@@ -150,7 +246,6 @@ class VtParts:
     def dr_to_point(self):
         mat_inv = np.linalg.inv(self.mat_affine)
         self.point[self.fr_num] = (mat_inv[:2, :2] @ self.dr_point.T).T + mat_inv[:2, -1]
-
 
     def delete_item(self):
         if self.tk_line_id:
@@ -242,8 +337,6 @@ class VtParts:
         for ii in range(self.sel_st_p, self.sel_ed_p+1):
             self.vt_point[ii].select()
 
-
-
     def reset_dr_posi(self):
         for ix, vp in enumerate(self.vt_point):
             vp.dr_posi = self.dr_point[ix]
@@ -254,106 +347,28 @@ class VtParts:
             self.reset_dr_posi()
 
     def smoothing(self):
-        if self.sel_ed_p- self.sel_st_p +1 > 5:
-            dat = signal.savgol_filter(self.dr_point[self.sel_st_p:self.sel_ed_p+1], 5, 2, axis=0)
-            self.dr_point[self.sel_st_p:self.sel_ed_p+1] = dat
-            self.reset_dr_posi()
+        self.dr_point = smoothing(self.dr_point, self.sel_st_p, self.sel_ed_p)
+        self.reset_dr_posi()
 
     def resample(self):
-        nn = len(self.dr_point)
-        f = scipy.interpolate.interp1d(np.arange(nn) * self.resample_num, self.dr_point.T)
-        y = f(np.arange((nn-1)*self.resample_num)).T
-        dxy = y[1:] - y[:-1]
-        dxy2 = dxy * dxy
-        dd = np.sqrt(dxy2[:,0] + dxy2[:,1])
-        ddcumsum = np.cumsum(dd)
-        po = np.arange(nn) * ddcumsum[-1] /(nn-1)
-
-        pix =[0]
-        for ix in range(1,nn-1):
-            dis = np.abs(ddcumsum - po[ix])
-            pix.append(np.argmin(dis))
-        pix.append(-1)
-        self.dr_point = y[np.array(pix)]
+        self.dr_point = resample(self.dr_point, self.resample_num)
         self.reset_dr_posi()
 
     def fine_tune(self, img_np, flip_flg):
-        sz = img_np.shape
-        f = scipy.interpolate.interp2d(np.arange(sz[0]),np.arange(sz[1]), img_np, 'cubic')
-        c_dat = self.point[self.fr_num]
-        ret_xy = [c_dat[0]]
-        for ix in range(1,len(c_dat)-1):
-            a0 = (c_dat[ix + 1][0] - c_dat[ix - 1][0])
-            a1 = (c_dat[ix + 1][1] - c_dat[ix - 1][1])
-            a = -a0 / (a1 + 0.00000001)
-            b = c_dat[ix][1] - a * c_dat[ix][0]
-            dl = np.sqrt(1+a*a)
-            if a0 < 0 and a1 < 0:
-                xi = np.arange(self.FineTuneNum, -(self.FineTuneNum + 1), -1) / self.FineTuneNum * (
-                            self.FineTuneDis / dl) + c_dat[ix][0]
-                yi = a * xi + b
-                imtmp = f(xi, yi)
-                y = np.array([imtmp[ii, self.FineTuneNum*2-ii] for ii in range(self.FineTuneNum*2)])
-                dy = y[1:] - y[:-1]
-                if flip_flg:
-                    kk = np.argmax(dy)
-                else:
-                    kk = np.argmin(dy)
-            elif a0 > 0 and a1 < 0:
-                xi = np.arange(self.FineTuneNum, -(self.FineTuneNum + 1), -1) / self.FineTuneNum * (
-                            self.FineTuneDis / dl) + c_dat[ix][0]
-                yi = a * xi + b
-                imtmp = f(xi, yi)
-                y = np.array([imtmp[self.FineTuneNum*2-ii, self.FineTuneNum*2-ii] for ii in range(self.FineTuneNum*2)])
-                dy = y[1:] - y[:-1]
-                if flip_flg:
-                    kk = np.argmax(dy)
-                else:
-                    kk = np.argmin(dy)
-            elif a0 > 0 and a1 > 0:
-                xi = np.arange(-self.FineTuneNum, self.FineTuneNum + 1, 1) / self.FineTuneNum * (
-                            self.FineTuneDis / dl) + c_dat[ix][0]
-                yi = a * xi + b
-                imtmp = f(xi, yi)
-                y = np.array([imtmp[self.FineTuneNum*2 - ii, ii] for ii in range(self.FineTuneNum*2)])
-                dy = y[1:] - y[:-1]
-                if flip_flg:
-                    kk = np.argmax(dy)
-                else:
-                    kk = np.argmin(dy)
-            else:
-                xi = np.arange(-self.FineTuneNum, (self.FineTuneNum + 1), 1) / self.FineTuneNum * (
-                            self.FineTuneDis / dl) + c_dat[ix][0]
-                yi = a * xi + b
-                imtmp = f(xi, yi)
-                y = np.array([imtmp[ii, ii] for ii in range(self.FineTuneNum*2)])
-                dy = y[1:] - y[:-1]
-                if flip_flg:
-                    kk = np.argmax(dy)
-                else:
-                    kk = np.argmin(dy)
-            x_ = (xi[kk] + xi[kk+1])/2
-            y_ = (yi[kk] + yi[kk+1])/2
-            ret_xy.append([x_, y_])
-        ret_xy.append(c_dat[-1])
-        po = np.array(ret_xy)
-        for ix in range(len(ret_xy)):
+        po = self.fine_tune_base(img_np, flip_flg)
+
+        for ix in range(len(po)):
             if not self.vt_point[ix].selected:
                 po[ix] = self.point[self.fr_num][ix]
-        self.point[self.fr_num] = po
+        self.point[self.fr_num][1:-1] = po[1:-1]
         self.dr_point = self.get_drpoint()
         self.reset_dr_posi()
 
 
-
-
-
-class VTShape:
+class VTShapeBase:
     AllList = ['tongue', 'uplips', 'lowerlips', 'palate', 'uppharynx', 'lowpharynx', 'larynx']
-
-    def __init__(self, canvas, cfg, part='tongue', fr_num=0, win=None):
-        self.cfg = cfg
-        self.win = win
+    def __init__(self, part='tongue'):
+        self.part_name = part
         self.PNum = {'tongue':40,  # % 舌の点数-------------------変更可能----
                      'uplips':15,  # % 上唇の点数-----------------変更可能----
                      'lowerlips':25,  # % 下唇の点数-----------------変更可能----
@@ -362,18 +377,7 @@ class VTShape:
                      'lowpharynx':14,  # % 咽頭の点数------------------変更可能----
                      'larynx':30  # % 喉頭蓋の点数-----------------変更可能----
                      }
-        self.canvas = canvas
-        self.tkcanvas = canvas.get_tkwidget()
-        self.part_name = part
-        self.fr_num = fr_num
-
-        self.init_class_values(cfg)
-
         self.parts = {}
-
-        self.read_dat()
-
-        self.tkcanvas.bind('<Button-3>', self.del_select_all)
 
     def __len__(self):
         if self.part_name in self.parts:
@@ -381,9 +385,44 @@ class VTShape:
         else:
             return 0
 
-    def init_class_values(self, cfg):
-        VtParts.FineTuneDis=cfg.finetune_distance
+    def read_dat(self, fname):
+        dat = np.loadtxt(fname, delimiter=',')
+        if dat.shape[1] > 300:
+            st = 0
+            for name in self.AllList:
+                ed = st + self.PNum[name] * 2
+                self.parts[name] = VtPartsBase(name, dat[:, st:ed])
+                st = ed
+        else:
+            self.parts[self.part_name] = VtPartsBase(self.part_name, dat)
 
+    def save_dat(self, fname):
+        dat = self.parts[self.AllList[0]].point
+        ll = len(dat)
+        dat = dat.reshape([ll, -1])
+        for pname in self.AllList[1:]:
+            dat = np.concatenate([dat, self.parts[pname].point.reshape([ll, -1])], 1)
+        np.savetxt(fname, dat, fmt='%.2f', delimiter=',')
+
+
+
+class VTShape(VTShapeBase):
+    def __init__(self, canvas, cfg, part='tongue', fr_num=0, win=None):
+        super().__init__(part)
+        self.cfg = cfg
+        self.win = win
+        self.canvas = canvas
+        self.tkcanvas = canvas.get_tkwidget()
+        self.fr_num = fr_num
+
+        self.init_class_values(cfg)
+
+        self.read_dat()
+
+        self.tkcanvas.bind('<Button-3>', self.del_select_all)
+
+    def init_class_values(self, cfg):
+        VtPartsBase.FineTuneDis=cfg.finetune_distance
 
     def reset_para(self):
         for pname in self.parts.keys():
