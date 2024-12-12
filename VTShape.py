@@ -438,7 +438,7 @@ class VTShape(VTShapeBase):
         if fn:
             fname = fn
         else:
-            fname = self.cfg.file.format(dir=self.cfg.dir, fname=self.cfg.fname)
+            fname = self.cfg.file.format(dir=self.cfg.dir, spk=self.cfg.spk, fname=self.cfg.fname)
         dat = np.loadtxt(fname, delimiter=',')
         if dat.shape[1] > 300:
             st = 0

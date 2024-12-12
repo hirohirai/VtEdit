@@ -9,16 +9,21 @@ mri:
   offset_y: 80
   scale: 4.0
 
-  dir: data/Img/s1
+  # dir: data/Img/s1
+  dir: ../DBS_/rtmri-atr503/Img
+  spk: s1
   fname: A01
   ext: npy
-  file: '{dir}/{fname}/{frame_num:03d}.{ext}'
+  file: '{dir}/{spk}/{fname}/{frame_num:03d}.{ext}'
   num_base: 0
 
 
 vt:
-  dir: data/dat/s1/all
+  dir: odata/dat
+  #dir: ../DBS_/rtmri-atr503/dat
+  spk: s1
   fname: A01
-  file: '{dir}/{fname}.dat'
+  file: '{dir}/{spk}/all/{fname}.dat'
 
   finetune_distance: 3
+

@@ -22,6 +22,8 @@ import PySimpleGUI as sg
 from MriImg import Mri
 from VTShape import VTShape
 
+import data_list
+
 # ログの設定
 logger = logging.getLogger(__name__)
 
@@ -119,6 +121,17 @@ def redraw(mri, vt, num, force_flg=False):
         vt.fr_num = num
         vt.draw()
 
+def img_vt_reopen(cfg, mri, vt, fname, frnum):
+    cfg.mri.fname = fname
+    cfg.vt.fname = fname
+    cfg.frame_num = frnum
+    mri.num = cfg.frame_num
+    mri.read_file()
+    mri.draw()
+
+    vt.fr_num = cfg.frame_num
+    vt.reset_para()
+    vt.draw()
 
 def img_open(cfg, mri, vt):
     ret = sg.popup_get_text("set fname", default_text=cfg.mri.fname)
@@ -135,7 +148,7 @@ def img_open(cfg, mri, vt):
     vt.draw()
 
 def vt_open(cfg, vt):
-    vtfn = cfg.vt.file.format(dir=cfg.vt.dir, fname=cfg.vt.fname)
+    vtfn = cfg.vt.file.format(dir=cfg.vt.dir, spk=cfg.vt.spk, fname=cfg.vt.fname)
     fn = sg.popup_get_file('VTOpen', default_path=vtfn, file_types=(('vt data', '*.dat'),))
     if fn:
         vt.delete_item()
@@ -143,7 +156,39 @@ def vt_open(cfg, vt):
         vt.draw()
 
 
+def redraw_all(cfg, window, mri, vt, num, fname=None, ng_flg=False, dl_flg=False):
+    img_vt_reopen(cfg, mri, vt, fname, num)
+    window['NumIn'].update(f'{num}')
+    if fname is not None:
+        window['Fname'].update(fname)
+    if dl_flg:
+        window['dl_fnlst'].update(fname)
+        window['dl_frlst'].update(f'{num}')
+        ng_lbl = 'NG' if ng_flg else 'OK'
+        window['dl_ng'].update(ng_lbl)
+
+def make_save_filename(cfg, spk, fname):
+    return cfg.vt.file.format(dir=cfg.vt.dir, spk=spk, fname=fname)
+
+def vt_load(cfg, vt, spk, fname):
+    if fname is not None:
+        vt.delete_item()
+        fn = cfg.vt.file.format(dir=cfg.vt.dir, spk=spk, fname=fname)
+        vt.read_dat(fn)
+
+def vt_x3(vt, mri):
+        vt.dr_to_point()
+        vt.select_all()
+        vt.backup()
+        for ii in range(3):
+            vt.smoothing()
+            vt.resample()
+            vt.fine_tune(np.array(mri.pil_image))
+        vt.smoothing()
+        vt.resample()
+
 def main(args, cfg):
+
     file_menu = ["File", ["Open", "VT open", "VT save as", "VT save"]]
     proc_menu =  ["Proc", ["Smoothing", "Resample", "FineTune", "FineTuneX3"]]
     parts_menu = ["PMenu", VTShape.AllList]
@@ -162,16 +207,50 @@ def main(args, cfg):
               [canvas.get_sgwidget()]
               ]
 
+    dlst = data_list.DataList(args.task)
+    if len(dlst)>0:
+        dlst_bar_flg = True
+        nxt_fn_ix = dlst.stposi
+        fr_num = dlst.body[dlst.stposi].num
+        nxt_fr_ix = dlst.body[dlst.stposi].done_num
+        num = nxt_fr_ix
+        fnlst = dlst.get_fname_list()
+        frlst = [str(i) for i in range(fr_num)]
+        ng_flg = 'NG' if fr_num in dlst.body[dlst.stposi].ng_list else 'OK'
+        low_panel = [sg.Combo(fnlst, default_value=fnlst[nxt_fn_ix], key='dl_fnlst', enable_events=True, readonly=True),
+                     sg.Button('Prev', key='dl_prev'),
+                     sg.Combo(frlst, default_value=frlst[nxt_fr_ix], key='dl_frlst', enable_events=True, readonly=True),
+                     sg.OptionMenu(('OK','NG'), default_value=ng_flg, key='dl_ng'),
+                     sg.Button('Next', key='dl_next'),
+                     sg.Button('FTX3', key='dl_x3'),
+                     sg.Button('Ok', key='dl_ok_next'),
+                     sg.Button('Ng', key='dl_ng_next'),
+                     sg.Button('Save', key='dl_save')
+                     ]
+        layout.append(low_panel)
+
+        dlst_save_filename = args.otask
+    else:
+        dlst_bar_flg = False
+
+
     window = sg.Window("My Window", layout, finalize=True)
+    if dlst_bar_flg:
+        window['Fname'].update(fnlst[nxt_fn_ix])
+        window['NumIn'].update(str(num))
 
     save_filename = None
-    if args.mri:
+    if dlst_bar_flg:
+        cfg.mri.fname = fnlst[nxt_fn_ix]
+    elif args.mri:
         cfg.mri.file = args.mri + '{frame_num:03d}.{ext}'
     mri = Mri(canvas, cfg.mri, num)
     canvas.zoom_fit(mri.get_size())
     mri.draw()
 
-    if args.vt:
+    if dlst_bar_flg:
+        cfg.vt.fname = fnlst[nxt_fn_ix]
+    elif args.vt:
         cfg.vt.file = args.vt
     vt = VTShape(canvas, cfg.vt, part=cfg.canvas.parts_name, fr_num=num, win=window)
     vt.draw()
@@ -211,6 +290,74 @@ def main(args, cfg):
             vt.dr_to_point()
             vt.change_parts(values[event])
             window['VtShape'].update(values[event])
+        elif event == 'dl_next':
+            vt.dr_to_point()
+            ng_flg = True if values['dl_ng'] == 'NG' else False
+            cspk, cfname, cnum, cng_flg, cng = dlst.get_(num)
+            spk, fname, num_, ng_flg, save_flg = dlst.get_next(ng_flg)
+            if num_ > 0:
+                num = num_
+            if save_flg:
+                save_filename = make_save_filename(cfg, cspk, cfname)
+                vt.save_dat(save_filename)
+                vt_load(cfg, vt, spk, fname)
+                dlst.save(dlst_save_filename)
+            redraw_all(cfg, window, mri, vt, num, fname, ng_flg, dlst_bar_flg)
+        elif event == 'dl_prev':
+            vt.dr_to_point()
+            ng_flg = True if values['dl_ng'] == 'NG' else False
+            cspk, cfname, cnum, cng_flg, cng = dlst.get_(num)
+            spk, fname, num_, ng_flg, save_flg = dlst.get_prev(ng_flg)
+            if num_>=0:
+                num = num_
+            if save_flg:
+                save_filename = make_save_filename(cfg, cspk, cfname)
+                vt.save_dat(save_filename)
+                vt_load(cfg, vt, spk, fname)
+                dlst.save(dlst_save_filename)
+            redraw_all(cfg, window,mri,vt,num,fname,ng_flg, dlst_bar_flg)
+        elif event == 'dl_ok_next':
+            vt.dr_to_point()
+            ng_flg = False
+            cspk, cfname, cnum, cng_flg, cng = dlst.get_(num)
+            spk, fname, num_, ng_flg, save_flg = dlst.get_next(ng_flg)
+            if num_ > 0:
+                num = num_
+            if save_flg:
+                save_filename = make_save_filename(cfg, cspk, cfname)
+                vt.save_dat(save_filename)
+                vt_load(cfg, vt, spk, fname)
+                dlst.save(dlst_save_filename)
+            redraw_all(cfg, window, mri, vt, num, fname, ng_flg, dlst_bar_flg)
+            vt_x3(vt, mri)
+        elif event == 'dl_ng_next':
+            vt.dr_to_point()
+            ng_flg = True
+            cspk, cfname, cnum, cng_flg, cng = dlst.get_(num)
+            spk, fname, num_, ng_flg, save_flg = dlst.get_next(ng_flg)
+            if num_ > 0:
+                num = num_
+            if save_flg:
+                save_filename = make_save_filename(cfg, cspk, cfname)
+                vt.save_dat(save_filename)
+                vt_load(cfg, vt, spk, fname)
+                dlst.save(dlst_save_filename)
+            redraw_all(cfg, window, mri, vt, num, fname, ng_flg, dlst_bar_flg)
+            vt_x3(vt, mri)
+        elif event == 'dl_frlst':
+            num = int(values['dl_frlst'])
+            vt.dr_to_point()
+            dlst.set_(num)
+            spk, fname, num, ng_flg, save_flg = dlst.get_(num)
+            redraw_all(cfg, window, mri, vt, num, fname, ng_flg, dlst_bar_flg)
+        elif event == 'dl_save':
+            cspk, cfname, cnum, cng_flg, cng = dlst.get_(num)
+            save_filename = make_save_filename(cfg, cspk, cfname)
+            vt.save_dat(save_filename)
+            dlst.save(dlst_save_filename)
+        elif event =='dl_x3':
+            vt_x3(vt, mri)
+
         elif event in values:
             if values[event] == 'Smoothing':
                 vt.dr_to_point()
@@ -241,17 +388,19 @@ def main(args, cfg):
                 vt_open(cfg, vt)
             elif values[event] == 'VT save as':
                 vt.dr_to_point()
-                vtfn = cfg.vt.file.format(dir=cfg.vt.dir, fname=cfg.vt.fname)
+                vtfn = cfg.vt.file.format(dir=cfg.vt.dir, spk=cfg.vt.spk, fname=cfg.vt.fname)
                 save_filename = sg.popup_get_file('VT', save_as=True, default_path=vtfn, file_types=(('vt data', '*.dat'),))
                 if save_filename is not None:
                     vt.save_dat(save_filename)
             elif values[event] == 'VT save':
                 vt.dr_to_point()
                 if save_filename is None:
-                    vtfn = cfg.vt.file.format(dir=cfg.vt.dir, fname=cfg.vt.fname)
+                    vtfn = cfg.vt.file.format(dir=cfg.vt.dir, spk=cfg.vt.spk, fname=cfg.vt.fname)
                     save_filename = sg.popup_get_file('VT', save_as=True, default_path=vtfn, file_types=(('vt data', '*.dat'),))
                 if save_filename is not None:
                     vt.save_dat(save_filename)
+
+
 
     window.close()
 
@@ -262,6 +411,8 @@ if __name__ == "__main__":
     parser.add_argument('--conf', '-c', default='config.yaml')
     parser.add_argument('--mri', default='')
     parser.add_argument('--vt', default='')
+    parser.add_argument('-t', '--task', default='s1_all.csv')
+    parser.add_argument('-o', '--otask', default='s1_all.csv')
     # parser.add_argument('-s', '--opt_str', default='')
     # parser.add_argument('--opt_int',type=int, default=1)
     # parser.add_argument('-i', '--input',type=argparse.FileType('r'), default='-')

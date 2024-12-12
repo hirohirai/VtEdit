@@ -39,9 +39,15 @@ class Mri(MriBase):
 
         self.read_file()
 
-    def read_file(self):
+    def read_file(self, fname=None, frnum=None, spk=None):
+        if fname is None:
+            fname = self.cfg.fname
+        if frnum is not None:
+            self.num = frnum
+        if spk is None:
+            spk = self.cfg.spk
         num = self.num + self.num_base
-        fname = self.cfg.file.format(dir=self.cfg.dir,fname=self.cfg.fname, frame_num=num, ext=self.cfg.ext)
+        fname = self.cfg.file.format(dir=self.cfg.dir, spk=spk, fname=fname, frame_num=num, ext=self.cfg.ext)
 
         self.pil_image = super().read_file(fname)
 
