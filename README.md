@@ -34,3 +34,8 @@ Vocal tract contour extraction tool for rtMRI
 # Vtのload save
 - File->VT Open でdatファイルから読み込む
 - File->VT Save （as） で名前を変更し保存
+
+# command
+python finetune_command.py --mri MRIのディレクトリ　--idat 読み込むdatファイル --odat 出力ファイル
+- MRIのディレクトリは、npy形式に変換したMRIファイルが保存されているディレクトリ。例えば data/Img/s1/A01
+- idat odatはそれぞれ初期datファイルおよび出力datファイル
